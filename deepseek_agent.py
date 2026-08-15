@@ -9,7 +9,6 @@ class Deepseek:
 
     @classmethod
     def http_request(cls, msg):
-        print(type(msg))
         with httpx.Client(timeout=60.0) as client:
             response = client.post(
                 "https://api.deepseek.com/chat/completions",
@@ -26,14 +25,14 @@ class Deepseek:
 
 
 class Agent:
-    sysPrompt=os.getenv('SYS_PROMPT')
-    historyFile = os.getenv('HISTORY_FILE')
+    sys_prompt=os.getenv('SYS_PROMPT')
+    history_file = os.getenv('HISTORY_FILE')
     messages=[]
 
     @classmethod
     def load_history(cls):
-        assert cls.historyFile is not None
-        with open(cls.historyFile, "r", encoding="utf-8") as f:
+        assert cls.history_file is not None
+        with open(cls.history_file, "r", encoding="utf-8") as f:
             try:
                 return json.load(f)
             except json.JSONDecodeError:
@@ -41,15 +40,15 @@ class Agent:
 
     @classmethod
     def save_history(cls, msg: list):
-        assert cls.historyFile is not None
-        with open(cls.historyFile, "w", encoding="utf-8") as f:
+        assert cls.history_file is not None
+        with open(cls.history_file, "w", encoding="utf-8") as f:
             json.dump(msg, f, ensure_ascii=False, indent=2)
 
     @classmethod
     def start(cls):
         cls.messages=cls.load_history()
         if not cls.messages:
-            cls.messages.append({"role": "system", "content": cls.sysPrompt})
+            cls.messages.append({"role": "system", "content": cls.sys_prompt})
         while True:
             try:
                 user_input = input("\n👤 你: ").strip()
@@ -61,8 +60,8 @@ class Agent:
                     break
 
                 if user_input.lower() == "clear":
-                    messages = [{"role": "system", "content": cls.sysPrompt}]
-                    cls.save_history(messages)
+                    cls.messages = [{"role": "system", "content": cls.sys_prompt}]
+                    cls.save_history(cls.messages)
                     print("🧹 本地历史记录已清空")
                     continue
 
