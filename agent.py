@@ -1,30 +1,6 @@
 import os
-import dotenv
-import httpx
 import json
 import funs
-
-dotenv.load_dotenv()
-
-class Deepseek:
-    api_key = os.getenv('API_KEY')
-
-    @classmethod
-    def http_request(cls, msg):
-        with httpx.Client(timeout=60.0) as client:
-            response = client.post(
-                "https://api.deepseek.com/chat/completions",
-                headers={"Authorization": f"Bearer {cls.api_key}", "Content-Type": "application/json"},
-                json={"model": "deepseek-chat", "messages": msg, "stream": False, "tool_choice":"auto", "tools":funs.TOOLS_SCHEMA}
-            )
-            return response
-
-    @classmethod
-    def talk(cls, msg):
-        response = cls.http_request(msg)
-        result = response.json()
-        return result["choices"][0]["message"]
-
 
 class Agent:
     sys_prompt=os.getenv('SYS_PROMPT')
@@ -105,6 +81,7 @@ class Agent:
 
         while step_count < max_steps:
             step_count += 1
+            from deepseek import Deepseek
             response = Deepseek.talk(cls.messages)
 
             # 存入 assistant 消息

@@ -1,6 +1,5 @@
-import dotenv
-import deepseek_agent
+from dotenv import load_dotenv
+load_dotenv()
 
-dotenv.load_dotenv()
-
-deepseek_agent.Agent.start()
+from agent import Agent
+Agent.start()
