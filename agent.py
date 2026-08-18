@@ -1,11 +1,22 @@
 import os
 import json
-import funs
+from pathlib import Path
+from mcp import Client, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+from deepseek import Deepseek
+from mcp_cfg.mcp_client import AgentMCPClient
+
+PROJECT_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent
+MCP_DIR = BASE_DIR / "mcp_cfg"
+MCP_SERVER_PATH = MCP_DIR / "mcp_server.py"
 
 class Agent:
     sys_prompt=os.getenv('SYS_PROMPT')
     history_file = os.getenv('HISTORY_FILE')
     messages=[]
+    mcp_client=None
 
     @classmethod
     def load_history(cls):
@@ -22,53 +33,35 @@ class Agent:
         with open(cls.history_file, "w", encoding="utf-8") as f:
             json.dump(msg, f, ensure_ascii=False, indent=2)
 
+
     @classmethod
-    def execute_fun(cls, tool_calls):
+    async def execute_mcp_tools(cls, tool_calls):
         """
         遍历执行大模型指定的全部工具，并返回标准格式的 tool 消息列表
         """
         tool_messages = []
-
         for tool_call in tool_calls:
-            func_name = tool_call["function"]["name"]
+            function = tool_call["function"]
+            function_name = function["name"]
             tool_call_id = tool_call["id"]
-
-            # 1. 容错解析参数（防止模型偶发吐出不合法 JSON）
             try:
-                raw_args = tool_call["function"].get("arguments") or "{}"
-                func_args = json.loads(raw_args)
+                raw_arguments = function.get("arguments") or "{}"
+                arguments = json.loads(raw_arguments)
+                result = await cls.mcp_client.call_tool(function_name,arguments)
+                print(f"⚙️ [MCP 工具调用] {function_name}({arguments})，拿到结果{result}")
             except json.JSONDecodeError:
-                func_args = {}
-
-            print(f"  ⚙️ [Agent 执行工具] -> {func_name}({func_args})")
-
-            # 2. 匹配并执行本地函数
-            if func_name in funs.AVAILABLE_TOOLS:
-                tool_func = funs.AVAILABLE_TOOLS[func_name]
-                try:
-                    tool_result = tool_func(**func_args)
-                except Exception as e:
-                    tool_result = f"工具执行异常: {str(e)}"
-            else:
-                tool_result = f"错误：未找到名为 {func_name} 的工具"
-
-            # 3. 统一序列化为字符串（字典/列表优先转 json 格式）
-            if isinstance(tool_result, (dict, list)):
-                content = json.dumps(tool_result, ensure_ascii=False)
-            else:
-                content = str(tool_result)
-
-            # 4. 存入结果列表
+                result = "工具参数不是合法的 JSON"
+            except Exception as exc:
+                result = f"MCP 工具执行失败：{exc}"
             tool_messages.append({
                 "role": "tool",
                 "tool_call_id": tool_call_id,
-                "content": content
+                "content": str(result),
             })
-
         return tool_messages
 
     @classmethod
-    def run_turn(cls, user_input):
+    async def run_turn(cls, user_input):
         """
             处理单轮用户输入的完整思考-行动闭环
         """
@@ -93,7 +86,7 @@ class Agent:
                 return response.get("content","")  # 退出循环，返回最终文本
 
             else:
-                tool_results = cls.execute_fun(response["tool_calls"]) # 批量执行工具
+                tool_results = await cls.execute_mcp_tools(response["tool_calls"])
                 cls.messages.extend(tool_results) # 把所有工具执行结果追加到上下文
                 cls.save_history(cls.messages)
 
@@ -104,10 +97,28 @@ class Agent:
         return fallback_reply
 
     @classmethod
-    def start(cls):
-        cls.messages=cls.load_history()
-        if not cls.messages:
-            cls.messages.append({"role": "system", "content": cls.sys_prompt})
+    async def load_mcp(cls,callback):
+        server_params = StdioServerParameters(
+            command="uv",
+            args=[
+                "run",
+                "python",
+                str(MCP_SERVER_PATH),
+            ],
+            cwd=PROJECT_DIR,
+        )
+        transport = stdio_client(server_params)
+        async with Client(transport) as official_client:
+            mcp_client = AgentMCPClient(official_client)
+            tools = await mcp_client.get_deepseek_tools()
+            print(f"已连接 MCP Server，发现 {len(tools)} 个工具")
+            await callback(mcp_client, tools)
+
+
+    @classmethod
+    async def chat_loop(cls,mcp_client, tools_schema):
+        cls.mcp_client = mcp_client # 在咱们自己执行tools的时候，提供可执行对象
+        Deepseek.register_tools(tools_schema) # 让deepseek知道目前有哪些tools
         while True:
             try:
                 user_input = input("\n👤 你: ").strip()
@@ -124,12 +135,20 @@ class Agent:
                     print("🧹 本地历史记录已清空")
                     continue
 
-                reply = cls.run_turn(user_input)
-                print(reply)
+                reply = await cls.run_turn(user_input)
+                print(f"🤖：{reply}")
 
             except KeyboardInterrupt:
                 print("\n强制退出")
                 break
+
+    @classmethod
+    async def start(cls):
+        cls.messages=cls.load_history()
+        if not cls.messages:
+            cls.messages.append({"role": "system", "content": cls.sys_prompt})
+        await cls.load_mcp(cls.chat_loop)
+
 
 
 

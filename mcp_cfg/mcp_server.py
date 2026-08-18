@@ -3,9 +3,6 @@ import httpx
 from datetime import datetime
 from mcp.server import MCPServer
 
-from funs.current_time import get_current_time as current_time_impl
-from funs.trending import get_baidu_hot_search as hot_search_impl
-
 mcp = MCPServer("my-agent-tools")
 
 
