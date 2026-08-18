@@ -285,3 +285,168 @@ Git
 因此准确结论是：
 
 > MCP Server 可以使用任何语言实现；本地模式只要程序能以 MCP stdio 方式通信，远程模式只要服务能以 MCP Streamable HTTP 方式通信，你的 Python Client 就能连接调用。语言之间通过协议解耦。
+> 
+
+
+
+
+
+对，你理解得很准确。
+
+可以把 MCP 理解成：
+
+> 一套基于 JSON-RPC 的工具描述、调用和结果返回协议。
+
+整个过程是：
+
+```text
+MCP Server 开发者
+    ↓
+用自己语言的 SDK 注册工具
+    ↓
+启动 MCP Server
+    ↓
+你的 Agent 使用 MCP Client 连接
+    ↓
+发现并调用这些工具
+```
+
+例如 Python Server 使用装饰器：
+
+```python
+from mcp.server import MCPServer
+
+mcp = MCPServer("demo")
+
+
+@mcp.tool()
+def add(a: int, b: int) -> int:
+    """计算两个整数之和。"""
+    return a + b
+
+
+if __name__ == "__main__":
+    mcp.run()
+```
+
+SDK 会根据：
+
+```python
+函数名
+类型注解
+docstring
+```
+
+生成工具定义：
+
+```json
+{
+  "name": "add",
+  "description": "计算两个整数之和。",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "a": {
+        "type": "integer"
+      },
+      "b": {
+        "type": "integer"
+      }
+    },
+    "required": ["a", "b"]
+  }
+}
+```
+
+其他语言可能使用不同形式：
+
+```text
+Python      → 装饰器 @mcp.tool()
+Java        → 注解 @McpTool
+TypeScript  → server.registerTool(...)
+Go          → 注册处理函数
+Rust        → trait、宏或路由注册
+```
+
+它们的代码形式不同，但最终对外提供的都是统一 MCP 信息：
+
+```text
+tools/list
+tools/call
+```
+
+你的 Agent 不需要知道 Server 里面的函数是怎么实现的：
+
+```python
+tools = await client.list_tools()
+
+result = await client.call_tool(
+    "add",
+    {
+        "a": 1,
+        "b": 2,
+    },
+)
+```
+
+底层实际发生：
+
+```text
+Agent
+  │
+  ├── tools/list
+  │      ↓
+  │   得到 add 的描述和参数 Schema
+  │
+  └── tools/call
+         name = add
+         arguments = {"a": 1, "b": 2}
+             ↓
+         MCP Server 找到 add
+             ↓
+         执行真实函数
+             ↓
+         返回 CallToolResult
+```
+
+有一点需要稍微修正：
+
+> 并不是简单“标记自己是 MCP Server 函数”就够了，还需要 MCP SDK 或自己实现的协议层负责消息解析、工具路由和结果序列化。
+
+例如：
+
+```python
+@mcp.tool()
+def add(...):
+```
+
+装饰器只负责注册；真正让它成为 MCP Server 的是：
+
+```python
+mcp.run()
+```
+
+它会启动协议通信：
+
+```text
+stdio              本地进程通信
+Streamable HTTP    远程网络通信
+```
+
+你现在的 Agent 则承担 MCP Host 的职责：
+
+```text
+你的 Agent（MCP Host）
+├── 调用 DeepSeek
+├── 持有 MCP Client
+├── 连接 MCP Server
+├── 获取工具列表
+├── 将工具转换给 DeepSeek
+├── 接收 DeepSeek tool_calls
+├── 调用 MCP 工具
+└── 把工具结果交还 DeepSeek
+```
+
+一句话总结：
+
+> MCP Server 使用任意语言实现并注册能力，通过 MCP 协议把这些能力暴露出来；你的 Agent 使用 MCP Client 发现和调用它们，不需要理解 Server 的实现语言和内部代码。
