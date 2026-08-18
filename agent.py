@@ -107,11 +107,16 @@ class Agent:
             ],
             cwd=PROJECT_DIR,
         )
-        transport = stdio_client(server_params)
+        transport = stdio_client(server_params) # 这里可以是本地的，也可以是远端的网址
+        # 远程 MCP Server 默认无法直接操作你的本地电脑。因为工具代码运行在对方服务器上
+        # 如果想让第三方 MCP 工具操作你的本地环境，通常就是把别人发布的 MCP Server 安装或临时运行在本地。
+        # MCP 服务不一定是用python写，也可以用其他语言去写，只要能调用即可
+        # transport = "https://modelcontextprotocol.io/mcp"
         async with Client(transport) as official_client:
             mcp_client = AgentMCPClient(official_client)
             tools = await mcp_client.get_deepseek_tools()
             print(f"已连接 MCP Server，发现 {len(tools)} 个工具")
+            print(tools)
             await callback(mcp_client, tools)
 
 

@@ -125,3 +125,163 @@ MCP 不会替你完成 Agent Loop。
 ```
 
 从学习角度看，这一步很有价值：你已经把 Tool Calling、Agent Loop、MCP Client 和 MCP Server 之间的边界摸清楚了。
+
+
+
+
+
+对，完全正确。
+
+MCP 是通信协议，不限定实现语言。MCP Server 可以用任何语言开发，只要它遵循 MCP 协议，你的 Python MCP Client 就可以调用。
+
+```text
+Python Agent
+    │
+    │ MCP 协议
+    ▼
+MCP Server
+    ├── Python
+    ├── TypeScript / JavaScript
+    ├── Go
+    ├── Java
+    ├── Rust
+    ├── C#
+    └── 其他语言
+```
+
+关键不是语言，而是双方通过相同的 MCP 消息通信，例如：
+
+```text
+initialize
+tools/list
+tools/call
+resources/list
+resources/read
+prompts/list
+prompts/get
+```
+
+## 本地 stdio 模式
+
+只要第三方 Server 能作为本地命令启动即可。
+
+Node.js：
+
+```python
+StdioServerParameters(
+    command="npx",
+    args=[
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        str(PROJECT_DIR),
+    ],
+)
+```
+
+Go 编译后的可执行文件：
+
+```python
+StdioServerParameters(
+    command="/path/to/my-go-mcp-server",
+    args=["--workspace", str(PROJECT_DIR)],
+)
+```
+
+Java：
+
+```python
+StdioServerParameters(
+    command="java",
+    args=[
+        "-jar",
+        "/path/to/mcp-server.jar",
+    ],
+)
+```
+
+Rust 编译后的程序：
+
+```python
+StdioServerParameters(
+    command="/path/to/rust-mcp-server",
+    args=[],
+)
+```
+
+Docker：
+
+```python
+StdioServerParameters(
+    command="docker",
+    args=[
+        "run",
+        "--rm",
+        "-i",
+        "some-mcp-server:latest",
+    ],
+)
+```
+
+你的 Python Agent 不关心后面的程序用什么语言编写，它只关心：
+
+```text
+能否启动进程
+能否通过 stdin 接收 MCP 消息
+能否通过 stdout 返回 MCP 消息
+```
+
+注意，stdio Server 不应该往 stdout 打印普通日志，否则会污染 MCP 消息；日志通常写到 stderr。
+
+## 远程 HTTP 模式
+
+远程 MCP Server 使用什么语言就更不重要了：
+
+```python
+async with Client(
+    "https://example.com/mcp"
+) as client:
+    tools = await client.list_tools()
+```
+
+这个服务背后可能是：
+
+- Python + FastAPI
+- TypeScript + Express
+- Go + Gin
+- Java + Spring Boot
+- Rust + Axum
+- Cloudflare Workers
+- Serverless Function
+
+只要它正确实现 Streamable HTTP MCP，你的 Client 就能调用。
+
+## 与普通命令的区别
+
+并不是“任何程序能启动就可以作为 MCP Server”。
+
+例如：
+
+```python
+StdioServerParameters(
+    command="git",
+    args=["status"],
+)
+```
+
+这不行，因为 `git status` 输出的是普通文本，不理解 MCP 的 `initialize`、`tools/list` 和 `tools/call`。
+
+必须有一层 MCP Server：
+
+```text
+Python Agent
+    │ MCP tools/call
+    ▼
+Git MCP Server
+    │ 执行 git status
+    ▼
+Git
+```
+
+因此准确结论是：
+
+> MCP Server 可以使用任何语言实现；本地模式只要程序能以 MCP stdio 方式通信，远程模式只要服务能以 MCP Streamable HTTP 方式通信，你的 Python Client 就能连接调用。语言之间通过协议解耦。
